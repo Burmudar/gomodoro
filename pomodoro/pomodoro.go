@@ -5,6 +5,7 @@ import (
 	"log"
 	"math/rand"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -102,8 +103,11 @@ func (t *Timer) String() string {
 func (t *Timer) start() chan int {
 	cmd := make(chan int)
 	go func() {
-		done := time.After(t.FocusDuration)
+		//done := time.After(t.FocusDuration)
+		done := time.After(10 * time.Second)
 		interval := time.After(1 * time.Second)
+		atomicStop := atomic.Value{}
+		atomicStop.Store(false)
 
 		defer close(cmd)
 		for {
@@ -111,11 +115,18 @@ func (t *Timer) start() chan int {
 			case <-interval:
 				{
 					cmd <- 1
-					interval = time.After(1 * time.Second)
+					stop := atomicStop.Load().(bool)
+
+					if !stop {
+						interval = time.After(1 * time.Second)
+					} else {
+						cmd <- -1
+						break
+					}
 				}
 			case <-done:
 				{
-					close(cmd)
+					atomicStop.Store(true)
 				}
 			}
 		}
@@ -131,7 +142,9 @@ func (tm *TimerManager) streamListen() {
 			log.Printf("Handling payload")
 			go tm.handlePayload(p)
 		case <-tm.shutdownCh:
-			break
+			log.Printf("Shutting down TM listen channel")
+			close(tm.payloadCh)
+			return
 		}
 	}
 }
@@ -245,8 +258,13 @@ func main() {
 		case i := <-cmdCh:
 			{
 				log.Printf("From timer: %v", i)
+				if i < 0 {
+					tm.shutdownCh <- true
+					break
+				}
 			}
 		}
+		log.Println("!")
 	}
 
 }
