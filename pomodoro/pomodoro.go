@@ -5,7 +5,6 @@ import (
 	"log"
 	"math/rand"
 	"sync"
-	"sync/atomic"
 	"time"
 )
 
@@ -18,8 +17,16 @@ type Create struct {
 	Config
 }
 
-type Start struct {
+type TimerID struct {
 	Key int32
+}
+
+type Start struct {
+	TimerID
+}
+
+type Stop struct {
+	TimerID
 }
 
 type Config struct {
@@ -35,6 +42,7 @@ type Timer struct {
 	Elapsed       time.Duration
 	FocusDuration time.Duration
 	BreakDuration time.Duration
+	ShutdownCh    chan struct{}
 }
 
 type TimerManager struct {
@@ -42,6 +50,9 @@ type TimerManager struct {
 	payloadCh  chan *Payload
 	shutdownCh chan bool
 	mapLock    sync.RWMutex
+}
+
+type TimerEvent struct {
 }
 
 type IntervalElapsedEvent struct {
@@ -71,23 +82,12 @@ func newTimer(c *Config) *Timer {
 		0,
 		c.FocusTime,
 		c.BreakTime,
+		make(chan struct{}),
 	}
 }
 
 func (t *Timer) fire(event IntervalElapsedEvent) {
 	fmt.Println("FIRING EVENT!")
-}
-
-func (t *Timer) startInterval(interval time.Duration) chan bool {
-	done := make(chan bool)
-	go func() {
-		after := time.After(interval)
-		select {
-		case <-after:
-			done <- true
-		}
-	}()
-	return done
 }
 
 func (t *Timer) String() string {
@@ -100,39 +100,35 @@ func (t *Timer) String() string {
 	return res
 }
 
-func (t *Timer) start() chan int {
-	cmd := make(chan int)
-	go func() {
-		//done := time.After(t.FocusDuration)
-		done := time.After(10 * time.Second)
-		interval := time.After(1 * time.Second)
-		atomicStop := atomic.Value{}
-		atomicStop.Store(false)
+func (t *Timer) start() chan TimerEvent {
+	eventCh := make(chan TimerEvent)
+	go t.run(eventCh)
+	return eventCh
+}
 
-		defer close(cmd)
-		for {
-			select {
-			case <-interval:
-				{
-					cmd <- 1
-					stop := atomicStop.Load().(bool)
+func (t *Timer) run(eventCh chan TimerEvent) {
+	timeDone := time.After(10 * time.Second)
+	interval := time.After(1 * time.Second)
 
-					if !stop {
-						interval = time.After(1 * time.Second)
-					} else {
-						cmd <- -1
-						break
-					}
-				}
-			case <-done:
-				{
-					atomicStop.Store(true)
-				}
+	for {
+		select {
+		case <-interval:
+			{
+				go func() { eventCh <- TimerEvent{} }()
+				interval = time.After(1 * time.Second)
+			}
+		case <-timeDone:
+			{
+				go func() { eventCh <- TimerEvent{} }()
+				return
+			}
+		case <-t.ShutdownCh:
+			{
+				log.Printf("Shutting down Timer ...")
+				return
 			}
 		}
-	}()
-	return cmd
-
+	}
 }
 
 func (tm *TimerManager) streamListen() {
@@ -143,7 +139,6 @@ func (tm *TimerManager) streamListen() {
 			go tm.handlePayload(p)
 		case <-tm.shutdownCh:
 			log.Printf("Shutting down TM listen channel")
-			close(tm.payloadCh)
 			return
 		}
 	}
@@ -199,7 +194,7 @@ func (tm *TimerManager) handleCreate(conf *Config) int32 {
 	return key
 }
 
-func (tm *TimerManager) handleStart(start *Start) chan int {
+func (tm *TimerManager) handleStart(start *Start) chan TimerEvent {
 	tm.mapLock.Lock()
 	defer tm.mapLock.Unlock()
 
@@ -212,8 +207,21 @@ func (tm *TimerManager) handleStart(start *Start) chan int {
 	// 1. How do we stop it ?
 	// 2. How do we know its status ?
 	// 3. How does the timer report back on things ?
-	cmdCh := v.start()
-	return cmdCh
+	return v.start()
+}
+
+func (tm *TimerManager) handleStop(stop *Stop) error {
+	tm.mapLock.Lock()
+	defer tm.mapLock.Unlock()
+
+	timer, ok := tm.timers[stop.Key]
+	if !ok {
+		log.Fatalf("'%d' Timer not found", stop.Key)
+	}
+
+	log.Printf("Closing timer['%v']", stop.Key)
+	close(timer.ShutdownCh)
+	return nil
 }
 
 func main() {
@@ -250,21 +258,26 @@ func main() {
 	key := v.(int32)
 
 	log.Printf("Starting timer['%d']", key)
-	v = comms(wrap(Start{key}))
+	v = comms(wrap(Start{TimerID{key}}))
 
-	cmdCh := v.(chan int)
-	for {
+	eventCh := v.(chan TimerEvent)
+	stop := false
+	counter := 0
+	for !stop {
 		select {
-		case i := <-cmdCh:
+		case i := <-eventCh:
 			{
-				log.Printf("From timer: %v", i)
-				if i < 0 {
-					tm.shutdownCh <- true
-					break
+				counter += 1
+				log.Printf("From timer: %v [%d]", i, counter)
+				if counter > 10 {
+					tm.handleStop(&Stop{TimerID{key}})
+					//close(tm.shutdownCh)
+					stop = true
+					log.Printf("Stopping")
 				}
+				break
 			}
 		}
-		log.Println("!")
 	}
 
 }
