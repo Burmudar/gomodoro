@@ -7,6 +7,7 @@ import (
 	paramlogger "github.com/gobuffalo/mw-paramlogger"
 	"github.com/unrolled/secure"
 
+	"github.com/Burmudar/gomodoro/middleware"
 	"github.com/Burmudar/gomodoro/models"
 	"github.com/gobuffalo/buffalo-pop/pop/popmw"
 	csrf "github.com/gobuffalo/mw-csrf"
@@ -55,10 +56,16 @@ func App() *buffalo.App {
 		// Remove to disable this.
 		app.Use(popmw.Transaction(models.DB))
 
+		g := app.Group("/api/v1")
+		g.Use(middleware.Websockets)
+		g.GET("/websocket", WebSocketHandler)
+
 		// Setup and use translations:
 		app.Use(translations())
 
 		app.GET("/", HomeHandler)
+
+		app.GET("/pomodoro", PomodoroHandler)
 
 		app.ServeFiles("/", assetsBox) // serve files from the public directory
 	}

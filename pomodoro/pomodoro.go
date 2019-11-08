@@ -5,23 +5,21 @@ import (
 	"log"
 	"math/rand"
 	"sync"
-	"sync/atomic"
 	"time"
 )
 
-type Payload struct {
-	Reply chan interface{}
-	Data  interface{}
-}
+type TimerFunc func()
+type TimerEventType int
 
-type Create struct {
-	Config
-}
+var TimeIntervalEvent TimerEventType = 0
+var TimeCompleteEvent TimerEventType = 1
 
-type Start struct {
-	Key int32
-}
+var ErrTimerNotFound error = fmt.Errorf("Timer was not found")
 
+type TimerEvent struct {
+	Key int32,
+	Type TimerEventType
+}
 type Config struct {
 	FocusTime time.Duration
 	BreakTime time.Duration
@@ -35,27 +33,24 @@ type Timer struct {
 	Elapsed       time.Duration
 	FocusDuration time.Duration
 	BreakDuration time.Duration
+	Stop		  atomic.Value
+	OnInterval	  TimerFunc
+	OnComplete	  TimerFunc
 }
 
 type TimerManager struct {
 	timers     map[int32]*Timer
-	payloadCh  chan *Payload
 	shutdownCh chan bool
 	mapLock    sync.RWMutex
-}
-
-type IntervalElapsedEvent struct {
-	Interval time.Duration
-	Elapsed  time.Duration
 }
 
 func newTimerManager() *TimerManager {
 	manager := &TimerManager{
 		make(map[int32]*Timer),
-		make(chan *Payload),
 		make(chan bool),
 		sync.RWMutex{},
 	}
+	go manager.streamActiveTimerEvents()
 	return manager
 }
 
@@ -64,6 +59,9 @@ func newTimer(c *Config) *Timer {
 	start := now
 	end := start.Add(c.FocusTime)
 
+	var stop atomic.Value
+	stop.Store(false)
+
 	return &Timer{
 		start,
 		end,
@@ -71,23 +69,10 @@ func newTimer(c *Config) *Timer {
 		0,
 		c.FocusTime,
 		c.BreakTime,
+		stop,
+		nil,
+		nil,
 	}
-}
-
-func (t *Timer) fire(event IntervalElapsedEvent) {
-	fmt.Println("FIRING EVENT!")
-}
-
-func (t *Timer) startInterval(interval time.Duration) chan bool {
-	done := make(chan bool)
-	go func() {
-		after := time.After(interval)
-		select {
-		case <-after:
-			done <- true
-		}
-	}()
-	return done
 }
 
 func (t *Timer) String() string {
@@ -100,96 +85,45 @@ func (t *Timer) String() string {
 	return res
 }
 
-func (t *Timer) start() chan int {
-	cmd := make(chan int)
+func (t *Timer) start() {
+	//Should Reset Timer state
+
 	go func() {
 		//done := time.After(t.FocusDuration)
-		done := time.After(10 * time.Second)
-		interval := time.After(1 * time.Second)
-		atomicStop := atomic.Value{}
-		atomicStop.Store(false)
-
-		defer close(cmd)
+		complete := time.NewTimer(10 * time.Second)
+		interval := time.NewTicker(1 * time.Second)
 		for {
 			select {
-			case <-interval:
+			case <-interval.C:
 				{
-					cmd <- 1
-					stop := atomicStop.Load().(bool)
-
-					if !stop {
-						interval = time.After(1 * time.Second)
-					} else {
-						cmd <- -1
-						break
+					if t.OnInterval {
+						t.OnInterval()
 					}
 				}
-			case <-done:
+			case <-complete.C:
 				{
-					atomicStop.Store(true)
+					interval.Stop()
+					if t.OnComplete {
+						t.OnComplete()
+					}
+					return
+				}
+			case t.Stop.Load():
+				{
+					complete.Stop()
+					interval.Stop()
+					return
 				}
 			}
 		}
 	}()
-	return cmd
-
 }
 
-func (tm *TimerManager) streamListen() {
-	for {
-		select {
-		case p := <-tm.payloadCh:
-			log.Printf("Handling payload")
-			go tm.handlePayload(p)
-		case <-tm.shutdownCh:
-			log.Printf("Shutting down TM listen channel")
-			close(tm.payloadCh)
-			return
-		}
-	}
-}
-
-func payloadError(p *Payload, err error) {
-	p.Reply <- err
-}
-
-func (tm *TimerManager) handlePayload(p *Payload) {
-	switch p.Data.(type) {
-	case Create:
-		{
-			c, ok := p.Data.(Create)
-			if !ok {
-				payloadError(p, fmt.Errorf("Failed to cast to create struct"))
-			}
-
-			result := tm.handleCreate(&c.Config)
-			p.Reply <- result
-		}
-		break
-	case Start:
-		{
-			s, ok := p.Data.(Start)
-			if !ok {
-				payloadError(p, fmt.Errorf("Failed to cast to Start struct"))
-			}
-
-			result := tm.handleStart(&s)
-			p.Reply <- result
-		}
-		break
-	default:
-		{
-			fmt.Printf("Don't know how to handle: %v", p.Data)
-		}
-		break
-	}
-}
-
-func (tm *TimerManager) handleCreate(conf *Config) int32 {
+func (tm *TimerManager) NewTimer(conf *Config) int32 {
 	//Create the timer and register it a key
-	t := newTimer(conf)
 
 	key := rand.Int31()
+	t := newManagedTimer(key, newTimer(config))
 
 	tm.mapLock.Lock()
 	defer tm.mapLock.Unlock()
@@ -199,72 +133,31 @@ func (tm *TimerManager) handleCreate(conf *Config) int32 {
 	return key
 }
 
-func (tm *TimerManager) handleStart(start *Start) chan int {
+func (tm *TimerManager) StartTimer(key int32) error {
 	tm.mapLock.Lock()
 	defer tm.mapLock.Unlock()
 
-	v, ok := tm.timers[start.Key]
+	timer, ok := tm.timers[key]
 	if !ok {
-		log.Fatalf("'%d' Timer not found", start.Key)
+		log.Fatalf("'%d' Timer not found", key)
+		return nil, ErrTimerNotFound
 	}
 
-	// so we start the timer but ...
-	// 1. How do we stop it ?
-	// 2. How do we know its status ?
-	// 3. How does the timer report back on things ?
-	cmdCh := v.start()
-	return cmdCh
+	timer.Start()
+	return nil
 }
 
-func main() {
-	tm := newTimerManager()
-	go tm.streamListen()
+func (tm *TimerManager) StopTimer(key int32) error {
+	tm.mapLock.Lock()
+	defer tm.mapLock.Unlock()
 
-	wrap := func(d interface{}) *Payload {
-		return &Payload{
-			make(chan interface{}),
-			d,
-		}
+	timer, ok := tm.timers[key]
+
+	if !ok {
+		log.Fatalf("'%d' Timer not found", key)
+		return ErrTimerNotFound
 	}
 
-	comms := func(p *Payload) interface{} {
-
-		tm.payloadCh <- p
-
-		reply := <-p.Reply
-
-		log.Printf("Reply: %v", reply)
-
-		return reply
-	}
-
-	v := comms(wrap(
-		Create{
-			Config{
-				1 * time.Minute,
-				5 * time.Minute,
-				1 * time.Minute,
-			},
-		}))
-
-	key := v.(int32)
-
-	log.Printf("Starting timer['%d']", key)
-	v = comms(wrap(Start{key}))
-
-	cmdCh := v.(chan int)
-	for {
-		select {
-		case i := <-cmdCh:
-			{
-				log.Printf("From timer: %v", i)
-				if i < 0 {
-					tm.shutdownCh <- true
-					break
-				}
-			}
-		}
-		log.Println("!")
-	}
-
+	timer.Stop()
+	return nil
 }
