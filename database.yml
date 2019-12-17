@@ -1,12 +1,12 @@
 ---
 development:
   dialect: "sqlite3"
-  database: /home/wbezuide/programming/golang/src/github.com/Burmudar/gomodoro_gomodoro_development.sqlite
+  database: /home/william/programming/golang/src/github.com/Burmudar/gomodoro_gomodoro_development.sqlite
 
 test:
   dialect: "sqlite3"
-  database: /home/wbezuide/programming/golang/src/github.com/Burmudar/gomodoro_gomodoro_test.sqlite
+  database: /home/william/programming/golang/src/github.com/Burmudar/gomodoro_gomodoro_test.sqlite
 
 production:
   dialect: "sqlite3"
-  database: /home/wbezuide/programming/golang/src/github.com/Burmudar/gomodoro_gomodoro_production.sqlite
+  database: /home/william/programming/golang/src/github.com/Burmudar/gomodoro_gomodoro_production.sqlite

@@ -2,6 +2,7 @@ package actions
 
 import (
 	"log"
+	"time"
 
 	"github.com/Burmudar/gomodoro/middleware"
 	"github.com/gobuffalo/buffalo"
@@ -30,7 +31,7 @@ func WebsocketHandler(c buffalo.Context) error {
 			break
 		case websocket.TextMessage:
 			{
-				handleTextMsg(ctx.Ws, string(data))
+				handleTextMsg(ctx, string(data))
 			}
 			break
 		case websocket.CloseMessage:
@@ -52,8 +53,18 @@ func WebsocketHandler(c buffalo.Context) error {
 	return nil
 }
 
-func handleTextMsg(ws *websocket.Conn, data string) (string, error) {
+func handleTextMsg(wctx middleware.WebSocketContext, data string) (string, error) {
 
+	wctx.Logger().Printf("Received from client: %v", data)
+
+	timeData, err := time.Now().MarshalText()
+	if err != nil {
+		wctx.Logger().Errorf("Failed to marshall time to text: %v", err)
+	}
+
+	wctx.Ws.WriteMessage(websocket.TextMessage, timeData)
+
+	wctx.Logger().Printf("Sent: %v", string(timeData))
 	return "", nil
 }
 

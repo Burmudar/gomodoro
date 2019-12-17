@@ -45,6 +45,8 @@ func Websockets(next buffalo.Handler) buffalo.Handler {
 			c.Render(500, render.JSON(resp))
 		}
 
+		c.Logger().Printf("Connection upgraded! Welcome to Websocket land!")
+
 		return next(WebSocketContext{c, conn})
 	}
 }
