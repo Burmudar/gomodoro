@@ -78,13 +78,14 @@ const configurator = {
 
     var config = {
       mode: env,
+      devtool: 'inline-source-map',
       entry: configurator.entries(),
       output: {filename: "[name].[hash].js", path: `${__dirname}/public/assets`},
       plugins: configurator.plugins(),
       module: configurator.moduleOptions(),
       resolve: {
         extensions: ['.ts', '.js', '.json']
-      }
+      },
     }
 
     if( env === "development" ){

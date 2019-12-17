@@ -1,10 +1,11 @@
-package main
+package pomodoro
 
 import (
 	"fmt"
 	"log"
 	"math/rand"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -17,7 +18,7 @@ var TimeCompleteEvent TimerEventType = 1
 var ErrTimerNotFound error = fmt.Errorf("Timer was not found")
 
 type TimerEvent struct {
-	Key int32,
+	Key  int32
 	Type TimerEventType
 }
 type Config struct {
@@ -33,9 +34,9 @@ type Timer struct {
 	Elapsed       time.Duration
 	FocusDuration time.Duration
 	BreakDuration time.Duration
-	Stop		  atomic.Value
-	OnInterval	  TimerFunc
-	OnComplete	  TimerFunc
+	Stop          atomic.Value
+	OnInterval    TimerFunc
+	OnComplete    TimerFunc
 }
 
 type TimerManager struct {
@@ -50,7 +51,6 @@ func newTimerManager() *TimerManager {
 		make(chan bool),
 		sync.RWMutex{},
 	}
-	go manager.streamActiveTimerEvents()
 	return manager
 }
 
@@ -96,34 +96,41 @@ func (t *Timer) start() {
 			select {
 			case <-interval.C:
 				{
-					if t.OnInterval {
+					if t.OnInterval != nil {
 						t.OnInterval()
 					}
 				}
 			case <-complete.C:
 				{
 					interval.Stop()
-					if t.OnComplete {
+					if t.OnComplete != nil {
 						t.OnComplete()
 					}
 					return
 				}
-			case t.Stop.Load():
+			default:
 				{
-					complete.Stop()
-					interval.Stop()
-					return
+					stop := t.Stop.Load().(bool)
+					if stop {
+						complete.Stop()
+						interval.Stop()
+						return
+					}
 				}
 			}
 		}
 	}()
 }
 
-func (tm *TimerManager) NewTimer(conf *Config) int32 {
+func (t *Timer) stop() {
+	t.Stop.Store(true)
+}
+
+func (tm *TimerManager) NewTimer(config *Config) int32 {
 	//Create the timer and register it a key
 
 	key := rand.Int31()
-	t := newManagedTimer(key, newTimer(config))
+	t := newTimer(config)
 
 	tm.mapLock.Lock()
 	defer tm.mapLock.Unlock()
@@ -140,10 +147,10 @@ func (tm *TimerManager) StartTimer(key int32) error {
 	timer, ok := tm.timers[key]
 	if !ok {
 		log.Fatalf("'%d' Timer not found", key)
-		return nil, ErrTimerNotFound
+		return ErrTimerNotFound
 	}
 
-	timer.Start()
+	timer.start()
 	return nil
 }
 
@@ -158,6 +165,6 @@ func (tm *TimerManager) StopTimer(key int32) error {
 		return ErrTimerNotFound
 	}
 
-	timer.Stop()
+	timer.stop()
 	return nil
 }
