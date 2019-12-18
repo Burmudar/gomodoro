@@ -2,12 +2,17 @@
 let process = true;
 let msgQueue = new Array<string>();
 
+let timerStore = new Map<string, object>();
+
 async function connect():Promise<WebSocket> {
 
     return new Promise( (resolve, reject) => {
         let socket:WebSocket = new WebSocket("ws://localhost:3000/api/v1/websocket");
         socket.onopen = (ev: Event):any => {
             console.log("Connection opened");
+            socket.send(JSON.stringify({
+                type: "register",
+            }));
             socket.onmessage = (ev: MessageEvent) => {
                 msgQueue.push(ev.data);
             };
@@ -27,26 +32,38 @@ async function wait(timeInMs:number):Promise<any> {
     return new Promise(resolve => setTimeout(resolve, timeInMs));
 }
 
+async function sendMsg(socket:WebSocket, payload:object) {
+    if (!payload) {
+        return
+    }
+    let data = JSON.stringify(payload);
+    socket.send(data);
+    console.log(`Sent: ${payload}`)
+}
+
 async function handleMsgReceived(socket:WebSocket, data:string) {
-    wait(500).then( () => {
-        console.log(`Received: ${data}`)
-        let payload = Date.now().toString();
-        socket.send(payload);
-        console.log(`Sent: ${payload}`)
-    });
+    console.log(`Received: ${data}`)
+
+    let msg = JSON.parse(data);
+    let payload:object = null;
+
+    switch (msg.Type) {
+        case "registration_id":
+            timerStore.set(msg.registration_id, {});
+            payload = { type: "ack", timestamp: Date.now().toString()};
+            break;
+        default:
+            console.log(`Unknown msg: ${msg}`)
+
+    }
+    sendMsg(socket, payload);
 }
 
 let server:WebSocket = null;
-connect().then( (socket) => {
-    return new Promise<WebSocket>( resolve => {
-        setTimeout(() => socket.send(Date.now().toLocaleString()), 10000);
-        resolve(socket);
-        }
-    );
-}).then((socket) => server = socket);
-
 
 async function Process() {
+    server = await connect();
+
     while (process) {
         if (msgQueue.length == 0) {
             await wait(1000);

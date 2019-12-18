@@ -45,7 +45,7 @@ type TimerManager struct {
 	mapLock    sync.RWMutex
 }
 
-func newTimerManager() *TimerManager {
+func NewTimerManager() *TimerManager {
 	manager := &TimerManager{
 		make(map[int32]*Timer),
 		make(chan bool),
