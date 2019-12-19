@@ -38,7 +38,7 @@ async function sendMsg(socket:WebSocket, payload:object) {
     }
     let data = JSON.stringify(payload);
     socket.send(data);
-    console.log(`Sent: ${payload}`)
+    console.log("Sent", data);
 }
 
 async function handleMsgReceived(socket:WebSocket, data:string) {
@@ -47,13 +47,21 @@ async function handleMsgReceived(socket:WebSocket, data:string) {
     let msg = JSON.parse(data);
     let payload:object = null;
 
-    switch (msg.Type) {
+    switch (msg.type) {
         case "registration_id":
-            timerStore.set(msg.registration_id, {});
-            payload = { type: "ack", timestamp: Date.now().toString()};
+            payload = { type: "new_timer", interval: 5, focus: 10, timestamp: Date.now()};
+            break;
+        case "timer_created":
+            payload = { type: "start_timer", timerId: msg.timerId, timestamp: Date.now()};
+            break;
+        case "timer_interval_event":
+            console.log(`Timer[${msg.timerId}] Interval Event. Elapsed: [${msg.Elapsed}]`);
+            break;
+        case "timer_done_event":
+            console.log(`Timer[${msg.timerId}] Complete Event. Elapsed: [${msg.Elapsed}]`);
             break;
         default:
-            console.log(`Unknown msg: ${msg}`)
+            console.log(msg);
 
     }
     sendMsg(socket, payload);

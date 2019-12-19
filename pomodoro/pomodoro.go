@@ -22,9 +22,11 @@ type TimerEvent struct {
 	Type TimerEventType
 }
 type Config struct {
-	FocusTime time.Duration
-	BreakTime time.Duration
-	Interval  time.Duration
+	FocusTime  time.Duration
+	BreakTime  time.Duration
+	Interval   time.Duration
+	IntervalCB TimerFunc
+	CompleteCB TimerFunc
 }
 
 type Timer struct {
@@ -65,13 +67,13 @@ func newTimer(c *Config) *Timer {
 	return &Timer{
 		start,
 		end,
-		5 * time.Minute,
+		c.Interval * time.Minute,
 		0,
 		c.FocusTime,
 		c.BreakTime,
 		stop,
-		nil,
-		nil,
+		c.IntervalCB,
+		c.CompleteCB,
 	}
 }
 
@@ -90,8 +92,8 @@ func (t *Timer) start() {
 
 	go func() {
 		//done := time.After(t.FocusDuration)
-		complete := time.NewTimer(10 * time.Second)
-		interval := time.NewTicker(1 * time.Second)
+		complete := time.NewTimer(t.FocusDuration)
+		interval := time.NewTicker(t.Interval)
 		for {
 			select {
 			case <-interval.C:
