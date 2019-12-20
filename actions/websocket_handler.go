@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"math/rand"
+	"strconv"
 	"sync"
 	"time"
 
@@ -31,10 +32,11 @@ type WebSocketHandlerStore struct {
 
 func NewWebSocketClientHandler(ctx *middleware.WebSocketContext) *WebSocketClientHandler {
 	var handler = WebSocketClientHandler{
-		Key:        fmt.Sprintf("%x", rand.Int31()),
-		Ctx:        ctx,
-		Conn:       ctx.Ws,
-		shutdownCh: make(chan bool),
+		Key:          fmt.Sprintf("%x", rand.Int31()),
+		Ctx:          ctx,
+		Conn:         ctx.Ws,
+		TimerManager: pomodoro.NewTimerManager(),
+		shutdownCh:   make(chan bool),
 	}
 
 	return &handler
@@ -85,7 +87,7 @@ type MsgType string
 
 type Msg struct {
 	Type      MsgType                `json:"type"`
-	Timestamp time.Time              `json:"timestamp"`
+	Timestamp int64                  `json:"timestamp"`
 	fields    map[string]interface{} `json:"omitempty"`
 }
 
@@ -111,13 +113,15 @@ type TimerCreatedReply struct {
 
 type StartTimer struct {
 	Msg
-	TimerId string `json:"timerId"`
+	TimerId int
 }
 
 type TimerEvent struct {
 	Msg
-	TimerId string `json:"timerId"`
-	Elapsed int    `json:"elapsed"`
+	TimerId   string    `json:"timerId"`
+	StartedAt time.Time `json:"startedAt"`
+	EndsAt    time.Time `json:"endsAt"`
+	Elapsed   float64   `json:"elapsed"`
 }
 
 func WebsocketHandler(c buffalo.Context) error {
@@ -143,10 +147,15 @@ func (h *WebSocketClientHandler) listenMessages() chan Msg {
 			msgType, data, err := h.Conn.ReadMessage()
 			logger := h.Ctx.Logger()
 
+			h.Ctx.Logger().Printf("Raw: %v %v %v", msgType, data, err)
+
 			if err != nil {
 				logger.Error(err)
-				defer close(msgChan)
-				return
+				h.Ctx.Logger().Printf("CLOSING!")
+				h.shutdownCh <- true
+				close(h.shutdownCh)
+				h.TimerManager.StopAll()
+				store.Del(h.Key)
 			}
 
 			switch msgType {
@@ -158,15 +167,21 @@ func (h *WebSocketClientHandler) listenMessages() chan Msg {
 			case websocket.TextMessage:
 				{
 					if msg, err := decodeTxtMsg(h.Ctx, string(data)); err != nil {
-
+						h.Ctx.Logger().Error("Failed to decode msg: %v", err)
 					} else {
+						h.Ctx.Logger().Printf("Sending decoded msg to channel: %v", msg)
 						msgChan <- msg
+						h.Ctx.Logger().Printf("sent to channel!")
 					}
 				}
 				break
 			case websocket.CloseMessage:
 				{
-					//handle close message
+					h.Ctx.Logger().Printf("CLOSING!")
+					h.shutdownCh <- true
+					close(h.shutdownCh)
+					h.TimerManager.StopAll()
+					store.Del(h.Key)
 				}
 				break
 			case websocket.PingMessage:
@@ -191,20 +206,24 @@ func (h *WebSocketClientHandler) handleClient() {
 
 	messages := h.listenMessages()
 
-	select {
-	case msg := <-messages:
-		h.processMsg(msg)
-	case <-h.shutdownCh:
-		close(messages)
-		break
+	for {
+		select {
+		case msg := <-messages:
+			h.processMsg(msg)
+		case <-h.shutdownCh:
+			close(messages)
+			return
+		}
 	}
 }
 
 func errorReply(wctx *middleware.WebSocketContext, message string) error {
 	msg := Msg{
 		Type:      ErrorType,
-		Timestamp: time.Now(),
+		Timestamp: time.Now().Unix(),
 	}
+
+	wctx.Logger().Errorf("Error: %v", message)
 
 	reply, err := json.Marshal(msg)
 	if err != nil {
@@ -219,17 +238,31 @@ func decodeTxtMsg(wctx *middleware.WebSocketContext, data string) (Msg, error) {
 	var msg Msg
 
 	wctx.Logger().Printf("decoding msg: %v", data)
-	if err := json.Unmarshal([]byte(data), &msg); err != nil {
+
+	result := make(map[string]interface{})
+	var err error
+
+	if err = json.Unmarshal([]byte(data), &result); err != nil {
 		wctx.Logger().Errorf("Failed to unmarshall data received from client: %v", data)
 		errorReply(wctx, "Error unmarshalling client data")
-		return msg, err
 	}
+
+	if v, ok := result["type"]; ok {
+		msg.Type = MsgType(v.(string))
+	}
+	if v, ok := result["timestamp]"]; ok {
+		msg.Timestamp = v.(int64)
+	}
+	msg.fields = result
 
 	return msg, nil
 }
 
 func (h *WebSocketClientHandler) processMsg(msg Msg) {
 
+	if len(msg.fields) == 0 {
+		return
+	}
 	h.Ctx.Logger().Printf("Processing msg: %v", msg)
 
 	switch msg.Type {
@@ -239,6 +272,9 @@ func (h *WebSocketClientHandler) processMsg(msg Msg) {
 	case NewTimerType:
 		h.Ctx.Logger().Printf("Handle New Timer msg")
 		h.handleNewTimer(msg)
+	case StartTimerType:
+		h.Ctx.Logger().Printf("Handle Start Timer msg")
+		h.handleStartTimer(msg)
 	}
 
 }
@@ -246,29 +282,32 @@ func (h *WebSocketClientHandler) processMsg(msg Msg) {
 func (h *WebSocketClientHandler) handleNewTimer(msg Msg) {
 	newTimerMsg := NewTimer{
 		Msg:      msg,
-		Interval: msg.fields["interval"].(int),
-		Focus:    msg.fields["focus"].(int),
+		Interval: int(msg.fields["interval"].(float64)),
+		Focus:    int(msg.fields["focus"].(float64)),
 	}
 
 	config := &pomodoro.Config{
-		FocusTime: time.Duration(newTimerMsg.Interval) * time.Minute,
+		FocusTime: time.Duration(newTimerMsg.Focus) * time.Minute,
 		BreakTime: 5 * time.Minute,
 		Interval:  time.Duration(newTimerMsg.Interval) * time.Second,
-		IntervalCB: func() {
+		IntervalCB: func(ts *pomodoro.TimerState) {
 			h.Conn.WriteJSON(TimerEvent{
 				Msg: Msg{
 					TimerIntervalEventType,
-					time.Now(),
+					time.Now().Unix(),
 					nil,
 				},
-				TimerId: fmt.Sprintf("%x", 1234),
+				TimerId:   fmt.Sprintf("%x", 1234),
+				StartedAt: ts.StartAt,
+				EndsAt:    ts.EndsAt,
+				Elapsed:   ts.Elapsed.Seconds(),
 			})
 		},
-		CompleteCB: func() {
+		CompleteCB: func(ts *pomodoro.TimerState) {
 			h.Conn.WriteJSON(TimerEvent{
 				Msg: Msg{
 					TimerCompleteEventType,
-					time.Now(),
+					time.Now().Unix(),
 					nil,
 				},
 				TimerId: fmt.Sprintf("%x", 1234),
@@ -281,7 +320,7 @@ func (h *WebSocketClientHandler) handleNewTimer(msg Msg) {
 	h.Conn.WriteJSON(TimerCreatedReply{
 		Msg: Msg{
 			TimerCreatedType,
-			time.Now(),
+			time.Now().Unix(),
 			nil,
 		},
 		TimerId: fmt.Sprintf("%v", key),
@@ -291,7 +330,7 @@ func (h *WebSocketClientHandler) handleNewTimer(msg Msg) {
 func (h *WebSocketClientHandler) handleClientRegister(r *Register) {
 	reply := RegisterReply{
 		Msg: Msg{Type: RegistratiodIdType,
-			Timestamp: time.Now(),
+			Timestamp: time.Now().Unix(),
 		},
 		Key: h.Key,
 	}
@@ -302,6 +341,21 @@ func (h *WebSocketClientHandler) handleClientRegister(r *Register) {
 		h.Ctx.Logger().Errorf("Failed to write registration reply: %v clientKey: %v", err, h.Key)
 	}
 	return
+}
+
+func (h *WebSocketClientHandler) handleStartTimer(msg Msg) {
+	hexId := msg.fields["timerId"].(string)
+
+	key, err := strconv.ParseInt(hexId, 10, 0)
+	if err != nil {
+		errorReply(h.Ctx, fmt.Sprintf("Failed to parse given timerId: %s", hexId))
+		return
+	}
+
+	if err = h.TimerManager.StartTimer(int32(key)); err != nil {
+		h.Ctx.Logger().Errorf("Failed to start timer: %v", err)
+	}
+
 }
 
 func handleBinaryMsg(ws *websocket.Conn, binary []byte) ([]byte, error) {
