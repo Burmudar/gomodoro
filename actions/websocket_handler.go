@@ -138,10 +138,20 @@ func WebsocketHandler(c buffalo.Context) error {
 	return nil
 }
 
+func (h *WebSocketClientHandler) cleanup() {
+	logger := h.Ctx.Logger()
+	logger.Printf("%v: Notifying go routines to shutdown", h.Key)
+	h.shutdownCh <- true
+	logger.Printf("%v: Stopping all timers", h.Key)
+	h.TimerManager.StopAll()
+	logger.Printf("%v: Removed client from store", h.Key)
+}
+
 func (h *WebSocketClientHandler) listenMessages() chan Msg {
 	msgChan := make(chan Msg)
 
 	go func() {
+		defer h.Ctx.Logger().Printf("Socket listener shutdown")
 
 		for {
 			msgType, data, err := h.Conn.ReadMessage()
@@ -151,11 +161,9 @@ func (h *WebSocketClientHandler) listenMessages() chan Msg {
 
 			if err != nil {
 				logger.Error(err)
-				h.Ctx.Logger().Printf("CLOSING!")
-				h.shutdownCh <- true
-				close(h.shutdownCh)
-				h.TimerManager.StopAll()
-				store.Del(h.Key)
+				h.Ctx.Logger().Printf("%v: Websocket Error. Shutting down socket listener", h.Key)
+				h.cleanup()
+				return
 			}
 
 			switch msgType {
@@ -177,16 +185,10 @@ func (h *WebSocketClientHandler) listenMessages() chan Msg {
 				break
 			case websocket.CloseMessage:
 				{
-					h.Ctx.Logger().Printf("CLOSING!")
-					h.shutdownCh <- true
-					close(h.shutdownCh)
-					h.TimerManager.StopAll()
-					store.Del(h.Key)
+					logger.Printf("%v: Close SocketControlMessage received. Shutting down socket listener", h.Key)
+					h.cleanup()
 				}
-				break
-			case websocket.PingMessage:
-				fallthrough
-			case websocket.PongMessage:
+			case websocket.PingMessage, websocket.PongMessage:
 				fallthrough
 			default:
 				{
@@ -212,6 +214,7 @@ func (h *WebSocketClientHandler) handleClient() {
 			h.processMsg(msg)
 		case <-h.shutdownCh:
 			close(messages)
+			h.Ctx.Logger().Printf("%v: Client message handler shutdown", h.Key)
 			return
 		}
 	}
