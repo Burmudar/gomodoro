@@ -7,7 +7,7 @@ let timerStore = new Map<string, object>();
 async function connect():Promise<WebSocket> {
 
     return new Promise( (resolve, reject) => {
-        let socket:WebSocket = new WebSocket("ws://localhost:3000/api/v1/websocket");
+        let socket:WebSocket = new WebSocket(`ws://${location.hostname}:3000/api/v1/websocket`);
         socket.onopen = (ev: Event):any => {
             console.log("Connection opened");
             socket.send(JSON.stringify({
@@ -49,16 +49,16 @@ async function handleMsgReceived(socket:WebSocket, data:string) {
 
     switch (msg.type) {
         case "registration_id":
-            payload = { type: "new_timer", interval: 5, focus: 10, timestamp: Date.now()};
+            payload = { type: "new_timer", interval: 5, focus: 10, timestamp: Date.now().valueOf()};
             break;
         case "timer_created":
-            payload = { type: "start_timer", timerId: msg.timerId, timestamp: Date.now()};
+            payload = { type: "start_timer", timerId: msg.timerId, timestamp: Date.now().valueOf()};
             break;
         case "timer_interval_event":
-            console.log(`Timer[${msg.timerId}] Interval Event. Elapsed: [${msg.Elapsed}]`);
+            console.log(`Timer[${msg.timerId}] Interval Event. Elapsed: [${msg.elapsed}]`);
             break;
         case "timer_done_event":
-            console.log(`Timer[${msg.timerId}] Complete Event. Elapsed: [${msg.Elapsed}]`);
+            console.log(`Timer[${msg.timerId}] Complete Event. Elapsed: [${msg.elapsed}]`);
             break;
         default:
             console.log(msg);

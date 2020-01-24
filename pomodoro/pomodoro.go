@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-type TimerFunc func()
+type TimerFunc func(ts *TimerState)
 type TimerEventType int
 
 var TimeIntervalEvent TimerEventType = 0
@@ -47,6 +47,13 @@ type TimerManager struct {
 	mapLock    sync.RWMutex
 }
 
+type TimerState struct {
+	Interval time.Duration
+	Elapsed  time.Duration
+	StartAt  time.Time
+	EndsAt   time.Time
+}
+
 func NewTimerManager() *TimerManager {
 	manager := &TimerManager{
 		make(map[int32]*Timer),
@@ -67,7 +74,7 @@ func newTimer(c *Config) *Timer {
 	return &Timer{
 		start,
 		end,
-		c.Interval * time.Minute,
+		c.Interval,
 		0,
 		c.FocusTime,
 		c.BreakTime,
@@ -89,6 +96,7 @@ func (t *Timer) String() string {
 
 func (t *Timer) start() {
 	//Should Reset Timer state
+	log.Println("Timer started")
 
 	go func() {
 		//done := time.After(t.FocusDuration)
@@ -99,14 +107,25 @@ func (t *Timer) start() {
 			case <-interval.C:
 				{
 					if t.OnInterval != nil {
-						t.OnInterval()
+						t.Elapsed += t.Interval
+						t.OnInterval(&TimerState{
+							t.Interval,
+							t.Elapsed,
+							t.Start,
+							t.End,
+						})
 					}
 				}
 			case <-complete.C:
 				{
 					interval.Stop()
 					if t.OnComplete != nil {
-						t.OnComplete()
+						t.OnComplete(&TimerState{
+							t.Interval,
+							t.Elapsed,
+							t.Start,
+							t.End,
+						})
 					}
 					return
 				}
@@ -152,7 +171,9 @@ func (tm *TimerManager) StartTimer(key int32) error {
 		return ErrTimerNotFound
 	}
 
+	log.Printf("Before timer start")
 	timer.start()
+	log.Printf("After timer start")
 	return nil
 }
 
@@ -168,5 +189,12 @@ func (tm *TimerManager) StopTimer(key int32) error {
 	}
 
 	timer.stop()
+	return nil
+}
+
+func (tm *TimerManager) StopAll() error {
+	for k, _ := range tm.timers {
+		tm.StopTimer(k)
+	}
 	return nil
 }
