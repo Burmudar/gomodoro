@@ -3,7 +3,6 @@ package actions
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 	"math/rand"
 	"strconv"
 	"sync"
@@ -16,6 +15,7 @@ import (
 )
 
 var ErrNotFound error = fmt.Errorf("Item was not found")
+var ErrInvalidContext error = fmt.Errorf("Context is not a WebsocketContext")
 
 type WebSocketClientHandler struct {
 	Key          string
@@ -23,6 +23,7 @@ type WebSocketClientHandler struct {
 	Conn         *websocket.Conn
 	TimerManager *pomodoro.TimerManager
 	shutdownCh   chan bool
+	logger 	buffalo.Logger
 }
 
 type WebSocketHandlerStore struct {
@@ -37,6 +38,7 @@ func NewWebSocketClientHandler(ctx *middleware.WebSocketContext) *WebSocketClien
 		Conn:         ctx.Ws,
 		TimerManager: pomodoro.NewTimerManager(),
 		shutdownCh:   make(chan bool),
+		logger: ctx.Logger(),
 	}
 
 	return &handler
@@ -127,7 +129,8 @@ type TimerEvent struct {
 func WebsocketHandler(c buffalo.Context) error {
 	ctx, ok := c.(middleware.WebSocketContext)
 	if !ok {
-		log.Fatalln("Context is not of type WebSocketContext")
+		ctx.Logger().Fatalf("Context is not of type WebSocketContext")
+		return ErrInvalidContext
 	}
 
 	h := NewWebSocketClientHandler(&ctx)
@@ -139,29 +142,24 @@ func WebsocketHandler(c buffalo.Context) error {
 }
 
 func (h *WebSocketClientHandler) cleanup() {
-	logger := h.Ctx.Logger()
-	logger.Printf("%v: Notifying go routines to shutdown", h.Key)
+	h.logger.Printf("%v: Notifying go routines to shutdown", h.Key)
 	h.shutdownCh <- true
-	logger.Printf("%v: Stopping all timers", h.Key)
+	h.logger.Printf("%v: Stopping all timers", h.Key)
 	h.TimerManager.StopAll()
-	logger.Printf("%v: Removed client from store", h.Key)
+	h.logger.Printf("%v: Removed client from store", h.Key)
 }
 
 func (h *WebSocketClientHandler) listenMessages() chan Msg {
 	msgChan := make(chan Msg)
 
 	go func() {
-		defer h.Ctx.Logger().Printf("Socket listener shutdown")
+		defer h.logger.Printf("Socket listener shutdown")
 
 		for {
 			msgType, data, err := h.Conn.ReadMessage()
-			logger := h.Ctx.Logger()
-
-			h.Ctx.Logger().Printf("Raw: %v %v %v", msgType, data, err)
 
 			if err != nil {
-				logger.Error(err)
-				h.Ctx.Logger().Printf("%v: Websocket Error. Shutting down socket listener", h.Key)
+				h.logger.Printf("%v: Websocket Error '%v'. Shutting down socket listener", h.Key, err)
 				h.cleanup()
 				return
 			}
@@ -169,31 +167,30 @@ func (h *WebSocketClientHandler) listenMessages() chan Msg {
 			switch msgType {
 			case websocket.BinaryMessage:
 				{
-					h.Ctx.Logger().Printf("Cannot decode Binary Msg!")
+					h.logger.Printf("Cannot decode Binary Msg!")
 				}
 				break
 			case websocket.TextMessage:
 				{
 					if msg, err := decodeTxtMsg(h.Ctx, string(data)); err != nil {
-						h.Ctx.Logger().Error("Failed to decode msg: %v", err)
+						h.logger.Error("Failed to decode msg: %v", err)
 					} else {
-						h.Ctx.Logger().Printf("Sending decoded msg to channel: %v", msg)
+						h.logger.Printf("Sending decoded msg to channel: %v", msg)
 						msgChan <- msg
-						h.Ctx.Logger().Printf("sent to channel!")
 					}
 				}
 				break
 			case websocket.CloseMessage:
 				{
-					logger.Printf("%v: Close SocketControlMessage received. Shutting down socket listener", h.Key)
+					h.logger.Printf("%v: Close SocketControlMessage received. Shutting down socket listener", h.Key)
 					h.cleanup()
 				}
 			case websocket.PingMessage, websocket.PongMessage:
 				fallthrough
 			default:
 				{
-					logger.Printf("Received Msg Type: %v", string(msgType))
-					logger.Printf("Data: %v", string(data))
+					h.logger.Printf("Received Msg Type: %v", string(msgType))
+					h.logger.Printf("Data: %v", string(data))
 				}
 			}
 		}
@@ -204,7 +201,7 @@ func (h *WebSocketClientHandler) listenMessages() chan Msg {
 
 func (h *WebSocketClientHandler) handleClient() {
 
-	h.Ctx.Logger().Printf("Handling messages for client [%s]", h.Key)
+	h.logger.Printf("Handling messages for client [%s]", h.Key)
 
 	messages := h.listenMessages()
 
@@ -214,7 +211,7 @@ func (h *WebSocketClientHandler) handleClient() {
 			h.processMsg(msg)
 		case <-h.shutdownCh:
 			close(messages)
-			h.Ctx.Logger().Printf("%v: Client message handler shutdown", h.Key)
+			h.logger.Printf("%v: Client message handler shutdown", h.Key)
 			return
 		}
 	}
@@ -266,17 +263,17 @@ func (h *WebSocketClientHandler) processMsg(msg Msg) {
 	if len(msg.fields) == 0 {
 		return
 	}
-	h.Ctx.Logger().Printf("Processing msg: %v", msg)
+	h.logger.Printf("Processing msg: %v", msg)
 
 	switch msg.Type {
 	case RegisterType:
-		h.Ctx.Logger().Printf("Handling register msg")
+		h.logger.Printf("Handling register msg")
 		h.handleClientRegister(&Register{msg})
 	case NewTimerType:
-		h.Ctx.Logger().Printf("Handle New Timer msg")
+		h.logger.Printf("Handle New Timer msg")
 		h.handleNewTimer(msg)
 	case StartTimerType:
-		h.Ctx.Logger().Printf("Handle Start Timer msg")
+		h.logger.Printf("Handle Start Timer msg")
 		h.handleStartTimer(msg)
 	}
 
@@ -338,10 +335,10 @@ func (h *WebSocketClientHandler) handleClientRegister(r *Register) {
 		Key: h.Key,
 	}
 
-	h.Ctx.Logger().Printf("Sending registration reply [%v]", h.Key)
+	h.logger.Printf("Sending registration reply [%v]", h.Key)
 
 	if err := h.Conn.WriteJSON(reply); err != nil {
-		h.Ctx.Logger().Errorf("Failed to write registration reply: %v clientKey: %v", err, h.Key)
+		h.logger.Errorf("Failed to write registration reply: %v clientKey: %v", err, h.Key)
 	}
 	return
 }
@@ -356,7 +353,7 @@ func (h *WebSocketClientHandler) handleStartTimer(msg Msg) {
 	}
 
 	if err = h.TimerManager.StartTimer(int32(key)); err != nil {
-		h.Ctx.Logger().Errorf("Failed to start timer: %v", err)
+		h.logger.Errorf("Failed to start timer: %v", err)
 	}
 
 }
