@@ -23,7 +23,7 @@ type WebSocketClientHandler struct {
 	Conn         *websocket.Conn
 	TimerManager *pomodoro.TimerManager
 	shutdownCh   chan bool
-	logger 	buffalo.Logger
+	logger       buffalo.Logger
 }
 
 type WebSocketHandlerStore struct {
@@ -38,7 +38,7 @@ func NewWebSocketClientHandler(ctx *middleware.WebSocketContext) *WebSocketClien
 		Conn:         ctx.Ws,
 		TimerManager: pomodoro.NewTimerManager(),
 		shutdownCh:   make(chan bool),
-		logger: ctx.Logger(),
+		logger:       ctx.Logger(),
 	}
 
 	return &handler
