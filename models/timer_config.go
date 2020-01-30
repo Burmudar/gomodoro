@@ -13,6 +13,22 @@ type TimerConfig struct {
 	ID        uuid.UUID `json:"id" db:"id"`
 	CreatedAt time.Time `json:"created_at" db:"created_at"`
 	UpdatedAt time.Time `json:"updated_at" db:"updated_at"`
+	FocusTime time.Duration `json:"focus_time" db:"focus_time"`
+	BreakTime time.Duration `json:"break_time" db:"break_time"`
+	Interval time.Duration `json:"interval" db:"interval"`
+}
+
+func NewTimerConfig(focusTime, breakTime, intervalTime time.Duration) (*TimerConfig, error) {
+	uuid, err := uuid.NewV4()
+
+	return &TimerConfig{
+		uuid,
+		time.Now(),
+		time.Now(),
+		focusTime,
+		breakTime,
+		intervalTime,
+	}, err
 }
 
 // String is not required by pop and may be deleted

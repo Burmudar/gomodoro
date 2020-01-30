@@ -10,6 +10,7 @@ import (
 
 	"github.com/Burmudar/gomodoro/middleware"
 	"github.com/Burmudar/gomodoro/pomodoro"
+	"github.com/Burmudar/gomodoro/models"
 	"github.com/gobuffalo/buffalo"
 	"github.com/gorilla/websocket"
 )
@@ -286,11 +287,19 @@ func (h *WebSocketClientHandler) handleNewTimer(msg Msg) {
 		Focus:    int(msg.fields["focus"].(float64)),
 	}
 
+	c, err := models.NewTimerConfig(time.Duration(newTimerMsg.Focus) * time.Minute, 5 * time.Minute, time.Duration(newTimerMsg.Interval) * time.Minute)
+
+	if err != nil {
+		h.logger.Errorf("Failed to create timer config: %v", err)
+	}
+
+	if err := models.DB.Create(c); err != nil {
+		h.logger.Errorf("Failed to save timer config in database: %v", err)
+	}
+
 	config := &pomodoro.Config{
-		FocusTime: time.Duration(newTimerMsg.Focus) * time.Minute,
-		BreakTime: 5 * time.Minute,
-		Interval:  time.Duration(newTimerMsg.Interval) * time.Second,
-		IntervalCB: func(ts *pomodoro.TimerState) {
+		c,
+		func(ts *pomodoro.TimerState) {
 			h.Conn.WriteJSON(TimerEvent{
 				Msg: Msg{
 					TimerIntervalEventType,
@@ -303,7 +312,7 @@ func (h *WebSocketClientHandler) handleNewTimer(msg Msg) {
 				Elapsed:   ts.Elapsed.Seconds(),
 			})
 		},
-		CompleteCB: func(ts *pomodoro.TimerState) {
+		func(ts *pomodoro.TimerState) {
 			h.Conn.WriteJSON(TimerEvent{
 				Msg: Msg{
 					TimerCompleteEventType,

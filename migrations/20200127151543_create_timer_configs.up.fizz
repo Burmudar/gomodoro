@@ -1,4 +1,7 @@
 create_table("timer_configs") {
 	t.Column("id", "uuid", {primary: true})
 	t.Timestamps()
+	t.Column("focus_time", "integer", {"default": 0})
+	t.Column("break_time", "integer", {"default": 0})
+	t.Column("interval", "integer", {"default": 0})
 }

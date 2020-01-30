@@ -2,6 +2,7 @@ package pomodoro
 
 import (
 	"fmt"
+	"github.com/Burmudar/gomodoro/models"
 	"log"
 	"math/rand"
 	"sync"
@@ -22,9 +23,7 @@ type TimerEvent struct {
 	Type TimerEventType
 }
 type Config struct {
-	FocusTime  time.Duration
-	BreakTime  time.Duration
-	Interval   time.Duration
+	*models.TimerConfig
 	IntervalCB TimerFunc
 	CompleteCB TimerFunc
 }
@@ -151,6 +150,9 @@ func (tm *TimerManager) NewTimer(config *Config) int32 {
 	//Create the timer and register it a key
 
 	key := rand.Int31()
+	//TODO: We first need to persist the config into the DB
+	//Then we create the timer and persist it too
+	//We probably need to give the websocket a UUID
 	t := newTimer(config)
 
 	tm.mapLock.Lock()
