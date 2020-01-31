@@ -18,6 +18,8 @@ require (
 	github.com/gobuffalo/packr/v2 v2.7.1
 	github.com/gobuffalo/pop v4.13.0+incompatible
 	github.com/gobuffalo/suite v2.8.2+incompatible
+	github.com/gobuffalo/validate v2.0.3+incompatible
+	github.com/gofrs/uuid v3.2.0+incompatible
 	github.com/gorilla/websocket v1.4.1
 	github.com/jackc/pgconn v1.1.0 // indirect
 	github.com/karrick/godirwalk v1.13.4 // indirect

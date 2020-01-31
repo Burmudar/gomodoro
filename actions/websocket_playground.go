@@ -7,4 +7,3 @@ import "github.com/gobuffalo/buffalo"
 func WebsocketPlaygroundHandler(c buffalo.Context) error {
 	return c.Render(200, r.HTML("websockets.html"))
 }
-
