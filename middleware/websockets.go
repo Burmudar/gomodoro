@@ -6,16 +6,12 @@ import (
 
 	"github.com/gobuffalo/buffalo"
 	"github.com/gobuffalo/buffalo/render"
-	"github.com/Burmudar/gomodoro/models"
 	"github.com/gorilla/websocket"
-	"github.com/gofrs/uuid"
-
 )
 
 type WebSocketContext struct {
 	buffalo.Context
 	Ws *websocket.Conn
-	UUID uuid.UUID
 }
 
 type ValidateOriginFn func(r *http.Request) bool
@@ -51,16 +47,6 @@ func Websockets(next buffalo.Handler) buffalo.Handler {
 
 		c.Logger().Printf("Connection upgraded! Welcome to Websocket land!")
 
-		tc, err := models.NewTimerClient()
-		if err != nil {
-			c.Logger().Errorf("Failed to create new TimerClient")
-		}
-
-		err = models.DB.Create(tc)
-		if err != nil {
-			c.Logger().Errorf("Failed to save TimerClient in database")
-		}
-
-		return next(WebSocketContext{c, conn, tc.ID})
+		return next(WebSocketContext{c, conn})
 	}
 }

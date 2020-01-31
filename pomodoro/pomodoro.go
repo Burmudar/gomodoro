@@ -89,6 +89,9 @@ func (t *Timer) String() string {
 	res += fmt.Sprintf("Elapsed: %v\n", t.Elapsed)
 	res += fmt.Sprintf("End: %v\n", t.End)
 	res += fmt.Sprintf("Interval: %v\n", t.Interval)
+	res += fmt.Sprintf("Focus: %v\n", t.FocusDuration)
+	res += fmt.Sprintf("Interval Callback: %v\n", t.OnInterval)
+	res += fmt.Sprintf("Complete Callback: %v\n", t.OnComplete)
 
 	return res
 }
@@ -96,9 +99,9 @@ func (t *Timer) String() string {
 func (t *Timer) start() {
 	//Should Reset Timer state
 	log.Println("Timer started")
+	log.Printf("\n%v", t)
 
 	go func() {
-		//done := time.After(t.FocusDuration)
 		complete := time.NewTimer(t.FocusDuration)
 		interval := time.NewTicker(t.Interval)
 		for {
