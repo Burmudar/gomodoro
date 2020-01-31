@@ -10,15 +10,16 @@ import (
 
 // TimerConfig model struct
 type TimerConfig struct {
-	ID        uuid.UUID `json:"id" db:"id"`
-	CreatedAt time.Time `json:"created_at" db:"created_at"`
-	UpdatedAt time.Time `json:"updated_at" db:"updated_at"`
-	FocusTime time.Duration `json:"focus_time" db:"focus_time"`
-	BreakTime time.Duration `json:"break_time" db:"break_time"`
-	Interval time.Duration `json:"interval" db:"interval"`
+	ID            uuid.UUID     `json:"id" db:"id"`
+	CreatedAt     time.Time     `json:"created_at" db:"created_at"`
+	UpdatedAt     time.Time     `json:"updated_at" db:"updated_at"`
+	FocusTime     time.Duration `json:"focus_time" db:"focus_time"`
+	BreakTime     time.Duration `json:"break_time" db:"break_time"`
+	Interval      time.Duration `json:"interval" db:"interval"`
+	TimerClientId uuid.UUID     `json: "timer_client_id", db:"timer_client_id"`
 }
 
-func NewTimerConfig(focusTime, breakTime, intervalTime time.Duration) (*TimerConfig, error) {
+func NewTimerConfig(focusTime, breakTime, intervalTime time.Duration, timerClientId string) (*TimerConfig, error) {
 	uuid, err := uuid.NewV4()
 
 	return &TimerConfig{
@@ -28,6 +29,7 @@ func NewTimerConfig(focusTime, breakTime, intervalTime time.Duration) (*TimerCon
 		focusTime,
 		breakTime,
 		intervalTime,
+		uuid.FromStringOrNil(timerClientId),
 	}, err
 }
 

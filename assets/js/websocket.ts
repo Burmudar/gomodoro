@@ -58,7 +58,7 @@ async function handleMsgReceived(socket:WebSocket, data:string) {
     switch (msg.type) {
         case "identified":
             console.log(`Server recognized ${CLIENT_ID}`)
-            payload = { type: "new_timer", interval: 5, focus: 10, timestamp: Date.now().valueOf()};
+            payload = { type: "get_timer_configs", timestamp: Date.now().valueOf()};
             break;
         case "registration_id":
             CLIENT_ID = msg.Key;
@@ -74,8 +74,13 @@ async function handleMsgReceived(socket:WebSocket, data:string) {
         case "timer_done_event":
             console.log(`Timer[${msg.timerId}] Complete Event. Elapsed: [${msg.elapsed}]`);
             break;
+        case "timer_configs_result":
+            console.log(`Result: ${console.table(msg.Result)}`)
+            payload = { type: "new_timer", interval: 5, focus: 10, timestamp: Date.now().valueOf()};
+            break;
         default:
             console.log(`Unkown Msg: ${msg.type}`);
+            payload = { type: "new_timer", interval: 5, focus: 10, timestamp: Date.now().valueOf()};
             console.log(msg);
 
     }

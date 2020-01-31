@@ -86,6 +86,8 @@ var TimerCreatedType MsgType = "timer_created"
 var StartTimerType MsgType = "start_timer"
 var TimerIntervalEventType MsgType = "timer_interval_event"
 var TimerCompleteEventType MsgType = "timer_complete_event"
+var GetTimerConfigsType MsgType = "get_timer_configs"
+var TimerConfigsResultType MsgType = "timer_configs_result"
 var ErrorType MsgType = "error"
 
 type MsgType string
@@ -136,6 +138,15 @@ type TimerEvent struct {
 	StartedAt time.Time `json:"startedAt"`
 	EndsAt    time.Time `json:"endsAt"`
 	Elapsed   float64   `json:"elapsed"`
+}
+
+type GetTimerConfigs struct {
+	Msg
+}
+
+type TimerConfigsResult struct {
+	Msg
+	Result []models.TimerConfig
 }
 
 func WebsocketHandler(c buffalo.Context) error {
@@ -288,6 +299,9 @@ func (h *WebSocketClientHandler) processMsg(msg Msg) {
 	case StartTimerType:
 		h.logger.Printf("Handle Start Timer msg")
 		h.handleStartTimer(msg)
+	case GetTimerConfigsType:
+		h.logger.Printf("Handle Get Timer Configs msg")
+		h.handleGetTimerConfigs(msg)
 	}
 
 }
@@ -434,6 +448,26 @@ func (h *WebSocketClientHandler) handleStartTimer(msg Msg) {
 		h.logger.Errorf("Failed to start timer: %v", err)
 	}
 
+}
+
+func (h *WebSocketClientHandler) handleGetTimerConfigs(msg Msg) {
+	configs := []models.TimerConfig{}
+	err := models.DB.Where("timerClientId = ?", h.Key).All(&configs)
+
+	if err != nil {
+		errorReply(h.Ctx, fmt.Sprintf("Error occured querying TimerConfigs for UUID: %v Err: %v", h.Key, err))
+	}
+
+	reply := TimerConfigsResult{
+		Msg: Msg{
+			Type:      TimerConfigsResultType,
+			Timestamp: time.Now().Unix(),
+		},
+		Result: configs,
+	}
+	if err = h.Conn.WriteJSON(reply); err != nil {
+		errorReply(h.Ctx, fmt.Sprintf("Error occured while writing JSON reply for GetConfigs: %v", err))
+	}
 }
 
 func handleBinaryMsg(ws *websocket.Conn, binary []byte) ([]byte, error) {
