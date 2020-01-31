@@ -1,6 +1,7 @@
 
 let process = true;
 let msgQueue = new Array<string>();
+let CLIENT_ID = "";
 
 let timerStore = new Map<string, object>();
 
@@ -10,9 +11,6 @@ async function connect():Promise<WebSocket> {
         let socket:WebSocket = new WebSocket(`ws://${location.hostname}:3000/api/v1/websocket`);
         socket.onopen = (ev: Event):any => {
             console.log("Connection opened");
-            socket.send(JSON.stringify({
-                type: "register",
-            }));
             socket.onmessage = (ev: MessageEvent) => {
                 msgQueue.push(ev.data);
             };
@@ -26,6 +24,16 @@ async function connect():Promise<WebSocket> {
         }
     });
 
+}
+
+async function registerWithServer(socket:WebSocket) {
+    let payload = { type: "register", timestamp: Date.now().valueOf()};
+    return sendMsg(socket, payload);
+}
+
+async function identifyWithServer(socket:WebSocket, clientId:string) {
+    let payload = { type: "identify", timestamp: Date.now().valueOf(), clientId: clientId };
+    return sendMsg(socket, payload);
 }
 
 async function wait(timeInMs:number):Promise<any> {
@@ -48,7 +56,13 @@ async function handleMsgReceived(socket:WebSocket, data:string) {
     let payload:object = null;
 
     switch (msg.type) {
+        case "identified":
+            console.log(`Server recognized ${CLIENT_ID}`)
+            payload = { type: "new_timer", interval: 5, focus: 10, timestamp: Date.now().valueOf()};
+            break;
         case "registration_id":
+            CLIENT_ID = msg.Key;
+            localStorage.setItem("clientId", CLIENT_ID);
             payload = { type: "new_timer", interval: 5, focus: 10, timestamp: Date.now().valueOf()};
             break;
         case "timer_created":
@@ -61,6 +75,7 @@ async function handleMsgReceived(socket:WebSocket, data:string) {
             console.log(`Timer[${msg.timerId}] Complete Event. Elapsed: [${msg.elapsed}]`);
             break;
         default:
+            console.log(`Unkown Msg: ${msg.type}`);
             console.log(msg);
 
     }
@@ -70,7 +85,17 @@ async function handleMsgReceived(socket:WebSocket, data:string) {
 let server:WebSocket = null;
 
 async function Process() {
-    server = await connect();
+    let serverPromise = connect();
+
+    CLIENT_ID = localStorage.getItem("clientId");
+
+    server = await serverPromise
+
+    if (!CLIENT_ID) {
+        await registerWithServer(server);
+    } else {
+        await identifyWithServer(server, CLIENT_ID);
+    }
 
     while (process) {
         if (msgQueue.length == 0) {

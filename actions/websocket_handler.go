@@ -3,15 +3,15 @@ package actions
 import (
 	"encoding/json"
 	"fmt"
-	"math/rand"
 	"strconv"
 	"sync"
 	"time"
 
 	"github.com/Burmudar/gomodoro/middleware"
-	"github.com/Burmudar/gomodoro/pomodoro"
 	"github.com/Burmudar/gomodoro/models"
+	"github.com/Burmudar/gomodoro/pomodoro"
 	"github.com/gobuffalo/buffalo"
+	"github.com/gofrs/uuid"
 	"github.com/gorilla/websocket"
 )
 
@@ -34,7 +34,7 @@ type WebSocketHandlerStore struct {
 
 func NewWebSocketClientHandler(ctx *middleware.WebSocketContext) *WebSocketClientHandler {
 	var handler = WebSocketClientHandler{
-		Key:          fmt.Sprintf("%x", rand.Int31()),
+		Key:          "",
 		Ctx:          ctx,
 		Conn:         ctx.Ws,
 		TimerManager: pomodoro.NewTimerManager(),
@@ -77,8 +77,10 @@ func (s *WebSocketHandlerStore) Get(key string) (*WebSocketClientHandler, error)
 
 var store = NewWebSocketHandlerStore()
 
+var IdentifyType MsgType = "identify"
+var IdentifiedType MsgType = "identified"
 var RegisterType MsgType = "register"
-var RegistratiodIdType MsgType = "registration_id"
+var RegistrationIdType MsgType = "registration_id"
 var NewTimerType MsgType = "new_timer"
 var TimerCreatedType MsgType = "timer_created"
 var StartTimerType MsgType = "start_timer"
@@ -101,6 +103,15 @@ type Register struct {
 type RegisterReply struct {
 	Msg
 	Key string
+}
+
+type Identify struct {
+	Msg
+	Key string
+}
+
+type IdentifiedReply struct {
+	Msg
 }
 
 type NewTimer struct {
@@ -266,10 +277,11 @@ func (h *WebSocketClientHandler) processMsg(msg Msg) {
 	}
 	h.logger.Printf("Processing msg: %v", msg)
 
+	if h.Key == "" {
+		h.handleUnknownClient(msg)
+	}
+
 	switch msg.Type {
-	case RegisterType:
-		h.logger.Printf("Handling register msg")
-		h.handleClientRegister(&Register{msg})
 	case NewTimerType:
 		h.logger.Printf("Handle New Timer msg")
 		h.handleNewTimer(msg)
@@ -287,7 +299,7 @@ func (h *WebSocketClientHandler) handleNewTimer(msg Msg) {
 		Focus:    int(msg.fields["focus"].(float64)),
 	}
 
-	c, err := models.NewTimerConfig(time.Duration(newTimerMsg.Focus) * time.Minute, 5 * time.Minute, time.Duration(newTimerMsg.Interval) * time.Minute)
+	c, err := models.NewTimerConfig(time.Duration(newTimerMsg.Focus)*time.Minute, 5*time.Minute, time.Duration(newTimerMsg.Interval)*time.Second)
 
 	if err != nil {
 		h.logger.Errorf("Failed to create timer config: %v", err)
@@ -298,8 +310,8 @@ func (h *WebSocketClientHandler) handleNewTimer(msg Msg) {
 	}
 
 	config := &pomodoro.Config{
-		c,
-		func(ts *pomodoro.TimerState) {
+		TimerConfig: c,
+		IntervalCB: func(ts *pomodoro.TimerState) {
 			h.Conn.WriteJSON(TimerEvent{
 				Msg: Msg{
 					TimerIntervalEventType,
@@ -312,7 +324,7 @@ func (h *WebSocketClientHandler) handleNewTimer(msg Msg) {
 				Elapsed:   ts.Elapsed.Seconds(),
 			})
 		},
-		func(ts *pomodoro.TimerState) {
+		CompleteCB: func(ts *pomodoro.TimerState) {
 			h.Conn.WriteJSON(TimerEvent{
 				Msg: Msg{
 					TimerCompleteEventType,
@@ -336,12 +348,69 @@ func (h *WebSocketClientHandler) handleNewTimer(msg Msg) {
 	})
 }
 
-func (h *WebSocketClientHandler) handleClientRegister(r *Register) {
-	reply := RegisterReply{
-		Msg: Msg{Type: RegistratiodIdType,
+func (h *WebSocketClientHandler) handleUnknownClient(msg Msg) {
+	switch msg.Type {
+	case IdentifyType:
+		{
+			identityMsg := Identify{
+				msg,
+				msg.fields["clientId"].(string),
+			}
+			h.logger.Printf("Handling Identify msg")
+			h.handleIdentifyClient(identityMsg)
+		}
+		break
+	case RegisterType:
+		h.logger.Printf("Handling register msg")
+		h.handleClientRegister(&Register{msg})
+	}
+
+}
+
+func (h *WebSocketClientHandler) handleIdentifyClient(i Identify) {
+	timerClient := models.TimerClient{}
+	err := models.DB.Find(&timerClient, uuid.FromStringOrNil(i.Key))
+
+	if err != nil {
+		h.logger.Errorf("Failed to retrieve client with id: %v", i.Key)
+		errorReply(h.Ctx, fmt.Sprintf("Client[%v] not found"))
+	}
+
+	h.Key = timerClient.ID.String()
+	h.logger.Printf("Client[%v] identified!")
+
+	reply := IdentifiedReply{
+		Msg: Msg{
+			Type:      IdentifiedType,
 			Timestamp: time.Now().Unix(),
 		},
-		Key: h.Key,
+	}
+
+	h.logger.Debugf("Sending client identified reply")
+	if err = h.Conn.WriteJSON(&reply); err != nil {
+		h.logger.Errorf("Failed to send identified reply: %v", reply)
+	}
+
+}
+
+func (h *WebSocketClientHandler) handleClientRegister(r *Register) {
+	tc, err := models.NewTimerClient()
+	if err != nil {
+		h.logger.Errorf("Failed to create new TimerClient")
+	}
+
+	err = models.DB.Create(tc)
+	if err != nil {
+		h.logger.Errorf("Failed to save TimerClient in database")
+	}
+
+	h.Key = tc.ID.String()
+
+	reply := RegisterReply{
+		Msg: Msg{Type: RegistrationIdType,
+			Timestamp: time.Now().Unix(),
+		},
+		Key: tc.ID.String(),
 	}
 
 	h.logger.Printf("Sending registration reply [%v]", h.Key)
