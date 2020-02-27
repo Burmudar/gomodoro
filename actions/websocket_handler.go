@@ -79,6 +79,7 @@ var store = NewWebSocketHandlerStore()
 
 var IdentifyType MsgType = "identify"
 var IdentifiedType MsgType = "identified"
+var UnknownClientError MsgType = "unknown_client_error"
 var RegisterType MsgType = "register"
 var RegistrationIdType MsgType = "registration_id"
 var NewTimerType MsgType = "new_timer"
@@ -88,7 +89,7 @@ var TimerIntervalEventType MsgType = "timer_interval_event"
 var TimerCompleteEventType MsgType = "timer_complete_event"
 var GetTimerConfigsType MsgType = "get_timer_configs"
 var TimerConfigsResultType MsgType = "timer_configs_result"
-var ErrorType MsgType = "error"
+var GenericError MsgType = "error"
 
 type MsgType string
 
@@ -118,8 +119,9 @@ type IdentifiedReply struct {
 
 type NewTimer struct {
 	Msg
-	Interval int `json:"interval"`
-	Focus    int `json:"focus"`
+	Interval int    `json:"interval"`
+	Focus    int    `json:"focus"`
+	ConfigID string `json:"configId`
 }
 
 type TimerCreatedReply struct {
@@ -240,9 +242,9 @@ func (h *WebSocketClientHandler) handleClient() {
 	}
 }
 
-func errorReply(wctx *middleware.WebSocketContext, message string) error {
+func errorReplyWithType(wctx *middleware.WebSocketContext, message string, errorType MsgType) error {
 	msg := Msg{
-		Type:      ErrorType,
+		Type:      errorType,
 		Timestamp: time.Now().Unix(),
 	}
 
@@ -255,6 +257,10 @@ func errorReply(wctx *middleware.WebSocketContext, message string) error {
 	wctx.Ws.WriteMessage(websocket.TextMessage, reply)
 
 	return nil
+}
+
+func errorReply(wctx *middleware.WebSocketContext, msg string) error {
+	return errorReplyWithType(wctx, msg, GenericError)
 }
 
 func decodeTxtMsg(wctx *middleware.WebSocketContext, data string) (Msg, error) {
@@ -306,21 +312,55 @@ func (h *WebSocketClientHandler) processMsg(msg Msg) {
 
 }
 
-func (h *WebSocketClientHandler) handleNewTimer(msg Msg) {
-	newTimerMsg := NewTimer{
-		Msg:      msg,
-		Interval: int(msg.fields["interval"].(float64)),
-		Focus:    int(msg.fields["focus"].(float64)),
+func getOrCreateTimerConfig(newTimerMsg NewTimer, timerKey string) (*models.TimerConfig, error) {
+	var c models.TimerConfig
+	var err error
+
+	if newTimerMsg.ConfigID != "" {
+		err = models.DB.Find(&c, uuid.FromStringOrNil(newTimerMsg.ConfigID))
+	} else {
+		value, err := models.NewTimerConfig(
+			time.Duration(newTimerMsg.Focus)*time.Minute,
+			5*time.Minute,
+			time.Duration(newTimerMsg.Interval)*time.Second,
+			timerKey,
+		)
+
+		if err != nil {
+			return nil, err
+		}
+
+		if err := models.DB.Create(value); err != nil {
+			return nil, err
+		}
 	}
 
-	c, err := models.NewTimerConfig(time.Duration(newTimerMsg.Focus)*time.Minute, 5*time.Minute, time.Duration(newTimerMsg.Interval)*time.Second)
+	return &c, err
+}
+
+func (h *WebSocketClientHandler) handleNewTimer(msg Msg) {
+	var newTimerMsg NewTimer
+
+	if v, ok := msg.fields["focus"]; !ok {
+		if v, ok = msg.fields["configId"].(string); ok {
+			newTimerMsg.ConfigID = v.(string)
+		} else {
+			errorReply(h.Ctx, "Invalid Timer Config details specified or no Timer Config ID given")
+		}
+	} else {
+		newTimerMsg = NewTimer{
+			Msg:      msg,
+			Interval: int(msg.fields["interval"].(float64)),
+			Focus:    int(msg.fields["focus"].(float64)),
+		}
+	}
+
+	c, err := getOrCreateTimerConfig(newTimerMsg, h.Key)
 
 	if err != nil {
 		h.logger.Errorf("Failed to create timer config: %v", err)
-	}
-
-	if err := models.DB.Create(c); err != nil {
-		h.logger.Errorf("Failed to save timer config in database: %v", err)
+		errorReply(h.Ctx, "Failed to get or create Timer Config")
+		return
 	}
 
 	config := &pomodoro.Config{
@@ -387,11 +427,13 @@ func (h *WebSocketClientHandler) handleIdentifyClient(i Identify) {
 
 	if err != nil {
 		h.logger.Errorf("Failed to retrieve client with id: %v", i.Key)
-		errorReply(h.Ctx, fmt.Sprintf("Client[%v] not found"))
+		msg := fmt.Sprintf("Client[%v] not found", i.Key)
+		errorReplyWithType(h.Ctx, msg, UnknownClientError)
+		return
 	}
 
 	h.Key = timerClient.ID.String()
-	h.logger.Printf("Client[%v] identified!")
+	h.logger.Printf("Client[%v] identified!", h.Key)
 
 	reply := IdentifiedReply{
 		Msg: Msg{
@@ -452,7 +494,7 @@ func (h *WebSocketClientHandler) handleStartTimer(msg Msg) {
 
 func (h *WebSocketClientHandler) handleGetTimerConfigs(msg Msg) {
 	configs := []models.TimerConfig{}
-	err := models.DB.Where("timerClientId = ?", h.Key).All(&configs)
+	err := models.DB.Where("timer_client_id = ?", h.Key).All(&configs)
 
 	if err != nil {
 		errorReply(h.Ctx, fmt.Sprintf("Error occured querying TimerConfigs for UUID: %v Err: %v", h.Key, err))

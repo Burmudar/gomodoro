@@ -2,10 +2,11 @@ package models
 
 import (
 	"encoding/json"
+	"time"
+
 	"github.com/gobuffalo/pop"
 	"github.com/gobuffalo/validate"
 	"github.com/gofrs/uuid"
-	"time"
 )
 
 // TimerConfig model struct
@@ -16,20 +17,20 @@ type TimerConfig struct {
 	FocusTime     time.Duration `json:"focus_time" db:"focus_time"`
 	BreakTime     time.Duration `json:"break_time" db:"break_time"`
 	Interval      time.Duration `json:"interval" db:"interval"`
-	TimerClientId uuid.UUID     `json: "timer_client_id", db:"timer_client_id"`
+	TimerClientID uuid.UUID     `json:"timer_client_id" db:"timer_client_id"`
 }
 
-func NewTimerConfig(focusTime, breakTime, intervalTime time.Duration, timerClientId string) (*TimerConfig, error) {
-	uuid, err := uuid.NewV4()
+func NewTimerConfig(focusTime, breakTime, intervalTime time.Duration, timerClientID string) (*TimerConfig, error) {
+	configUUID, err := uuid.NewV4()
 
 	return &TimerConfig{
-		uuid,
+		configUUID,
 		time.Now(),
 		time.Now(),
 		focusTime,
 		breakTime,
 		intervalTime,
-		uuid.FromStringOrNil(timerClientId),
+		uuid.FromStringOrNil(timerClientID),
 	}, err
 }
 

@@ -8,7 +8,8 @@ CREATE TABLE IF NOT EXISTS "timer_configs" (
 "updated_at" DATETIME NOT NULL,
 "focus_time" INTEGER NOT NULL DEFAULT '0',
 "break_time" INTEGER NOT NULL DEFAULT '0',
-"interval" INTEGER NOT NULL DEFAULT '0'
+"interval" INTEGER NOT NULL DEFAULT '0',
+"timer_client_id" char(36) NOT NULL
 );
 CREATE TABLE IF NOT EXISTS "timer_clients" (
 "id" TEXT PRIMARY KEY,

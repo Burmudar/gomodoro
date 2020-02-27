@@ -49,6 +49,19 @@ async function sendMsg(socket:WebSocket, payload:object) {
     console.log("Sent", data);
 }
 
+function setClientId(value:string) {
+    CLIENT_ID = value;
+    localStorage.setItem("clientId", value);
+}
+
+function createPayloadFromConfigs(configs:any) {
+    let rIdx = Math.floor(Math.random() * configs.length) % configs.length;
+
+    let payload = { type: "new_timer", configId: configs[rIdx].id, timestamp: Date.now().valueOf()};
+    return payload
+
+}
+
 async function handleMsgReceived(socket:WebSocket, data:string) {
     console.log(`Received: ${data}`)
 
@@ -60,9 +73,13 @@ async function handleMsgReceived(socket:WebSocket, data:string) {
             console.log(`Server recognized ${CLIENT_ID}`)
             payload = { type: "get_timer_configs", timestamp: Date.now().valueOf()};
             break;
+        case "unknown_client_error":
+            console.log(`Server did not recognize ${CLIENT_ID}. Attempting to re-register`)
+            setClientId("");
+            payload = null;
+            return await registerWithServer(socket);
         case "registration_id":
-            CLIENT_ID = msg.Key;
-            localStorage.setItem("clientId", CLIENT_ID);
+            setClientId(msg.Key);
             payload = { type: "new_timer", interval: 5, focus: 10, timestamp: Date.now().valueOf()};
             break;
         case "timer_created":
@@ -76,7 +93,7 @@ async function handleMsgReceived(socket:WebSocket, data:string) {
             break;
         case "timer_configs_result":
             console.log(`Result: ${console.table(msg.Result)}`)
-            payload = { type: "new_timer", interval: 5, focus: 10, timestamp: Date.now().valueOf()};
+            payload = createPayloadFromConfigs(msg.Result);
             break;
         default:
             console.log(`Unkown Msg: ${msg.type}`);
@@ -84,7 +101,10 @@ async function handleMsgReceived(socket:WebSocket, data:string) {
             console.log(msg);
 
     }
-    sendMsg(socket, payload);
+
+    if (payload) {
+        sendMsg(socket, payload);
+    }
 }
 
 let server:WebSocket = null;
