@@ -7,8 +7,8 @@ import (
 	paramlogger "github.com/gobuffalo/mw-paramlogger"
 	"github.com/unrolled/secure"
 
-	"github.com/Burmudar/gomodoro/middleware"
-	"github.com/Burmudar/gomodoro/models"
+	"github.com/burmudar/gomodoro/middleware"
+	"github.com/burmudar/gomodoro/models"
 	"github.com/gobuffalo/buffalo-pop/pop/popmw"
 	csrf "github.com/gobuffalo/mw-csrf"
 	i18n "github.com/gobuffalo/mw-i18n"

@@ -2,7 +2,7 @@ package pomodoro
 
 import (
 	"fmt"
-	"github.com/Burmudar/gomodoro/models"
+	"github.com/burmudar/gomodoro/models"
 	"log"
 	"math/rand"
 	"sync"

@@ -1,4 +1,4 @@
-module github.com/Burmudar/gomodoro
+module github.com/burmudar/gomodoro
 
 go 1.13
 

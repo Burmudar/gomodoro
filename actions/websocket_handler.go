@@ -7,9 +7,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Burmudar/gomodoro/middleware"
-	"github.com/Burmudar/gomodoro/models"
-	"github.com/Burmudar/gomodoro/pomodoro"
+	"github.com/burmudar/gomodoro/middleware"
+	"github.com/burmudar/gomodoro/models"
+	"github.com/burmudar/gomodoro/pomodoro"
 	"github.com/gobuffalo/buffalo"
 	"github.com/gofrs/uuid"
 	"github.com/gorilla/websocket"

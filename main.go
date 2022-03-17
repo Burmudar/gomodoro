@@ -3,7 +3,7 @@ package main
 import (
 	"log"
 
-	"github.com/Burmudar/gomodoro/actions"
+	"github.com/burmudar/gomodoro/actions"
 )
 
 // main is the starting point for your Buffalo application.
